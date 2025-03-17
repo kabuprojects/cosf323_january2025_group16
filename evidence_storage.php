@@ -1,4 +1,4 @@
-<?php
+git<?php
 session_start();
 include 'db.php'; // Database connection
 
