@@ -1,4 +1,6 @@
 # cosf323_january2025_group16
-linet kogo
-annette kibet
-naftal ombeka
+TOPIC:SECURE CHAIN OF CUSTODY SYSTEM
+GROUP MEMBERS
+LINET KOGO 
+ANNETTE KIBET
+NAFTAL OMBEKA
