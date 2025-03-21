@@ -1,220 +1,311 @@
-<?php 
-// Include the database connection
-require_once 'db.php';
+<?php
+// Start session to get the logged-in user
 session_start();
 
-// Check if the user is already logged in
-if (isset($_SESSION['user_id'])) {
-    header("Location: dashboard.php");
-    exit();
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$dbname = "chain_of_custody_db";
+
+$conn = new mysqli($host, $username, $password, $dbname);
+if ($conn->connect_error) {
+    die("Database Connection Failed: " . $conn->connect_error);
 }
 
-$error_message = ""; // Default error message
+// Set Kenyan timezone
+date_default_timezone_set('Africa/Nairobi');
 
-// Check if the form is submitted
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    if (!empty($_POST['username']) && !empty($_POST['password'])) {
-        // Get the form inputs
-        $username = mysqli_real_escape_string($conn, $_POST['username']);
-        $password = $_POST['password']; // Don't escape passwords
+// Function to log actions into the system_logs table
+function logAction($conn, $user_id, $action, $evidence_id, $performed_by, $from_role, $to_role) {
+    $ip_address = $_SERVER['REMOTE_ADDR'];
+    $user_agent = $_SERVER['HTTP_USER_AGENT'];
+    $log_date = date("Y-m-d H:i:s");
 
-        // Prepare SQL to fetch the user
-        $sql = "SELECT user_id, username, password, role_id FROM users WHERE username = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("s", $username);
-        $stmt->execute();
-        $result = $stmt->get_result();
+    // Fetch role names from the database
+    $from_role_name = getRoleName($conn, $from_role);
+    $to_role_name = getRoleName($conn, $to_role);
 
-        // Check if the user exists
-        if ($result->num_rows > 0) {
-            $user = $result->fetch_assoc();
+    // Format the action message dynamically
+    $action_message = "Evidence ID $evidence_id transferred to $to_role_name (User ID: $to_role) by $from_role_name (User ID: $performed_by)";
 
-            // Verify the password
-            if (password_verify($password, $user['password'])) {
-                // Store user details in session
-                $_SESSION['user_id'] = $user['user_id'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['role_id'] = $user['role_id'];
-
-                // ✅ Log the login event
-                $log_action = "User '{$user['username']}' logged in";
-                $sql_log = "INSERT INTO system_logs (user_id, action) VALUES (?, ?)";
-                $stmt_log = $conn->prepare($sql_log);
-                $stmt_log->bind_param("is", $user['user_id'], $log_action);
-                $stmt_log->execute();
-                $stmt_log->close();
-
-                // Redirect to the dashboard
-                header("Location: dashboard.php");
-                exit();
-            } else {
-                $error_message = "❌ Invalid password.";
-                
-                // ❌ Log the failed login attempt
-                $log_action = "Failed login attempt for username '{$username}'";
-                $sql_log = "INSERT INTO system_logs (user_id, action) VALUES (0, ?)";
-                $stmt_log = $conn->prepare($sql_log);
-                $stmt_log->bind_param("s", $log_action);
-                $stmt_log->execute();
-                $stmt_log->close();
-            }
-        } else {
-            $error_message = "❌ Username not found.";
-        }
-        $stmt->close();
-    } else {
-        $error_message = "❌ Please enter both username and password.";
-    }
+    $sql = "INSERT INTO system_logs (user_id, action, ip_address, user_agent, log_date, evidence_id, performed_by, from_role, to_role)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("issssiiii", $user_id, $action_message, $ip_address, $user_agent, $log_date, $evidence_id, $performed_by, $from_role, $to_role);
+    $stmt->execute();
+    $stmt->close();
 }
+
+// Function to get role name based on role ID from the database
+function getRoleName($conn, $role_id) {
+    $sql = "SELECT role_name FROM roles WHERE role_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $role_id);
+    $stmt->execute();
+    $stmt->bind_result($role_name);
+    $stmt->fetch();
+    $stmt->close();
+    return $role_name ?? "Unknown Role";
+}
+
+// Fetch received evidence
+$evidence_sql = "SELECT e.evidence_id, e.evidence_name, e.description, e.collection_date, c.case_name, u.username AS investigator_name,
+                        e.received_status, e.transfer_status, e.examiner_received, e.investigator_id, e.lab_personnel_id
+                 FROM evidence e
+                 JOIN cases c ON e.case_id = c.case_id
+                 JOIN users u ON e.investigator_id = u.user_id
+                 WHERE e.status = 'Transferred' OR e.status = 'Received' OR e.status = 'Analysis Complete'";
+$evidence_result = $conn->query($evidence_sql);
+$evidence_data = [];
+while ($row = $evidence_result->fetch_assoc()) {
+    $evidence_data[] = $row;
+}
+
+// Fetch all lab personnel from the users table
+$lab_personnel_sql = "SELECT user_id, username FROM users WHERE role_id = 4"; // Assuming role_id 4 is for Lab Personnel
+$lab_personnel_result = $conn->query($lab_personnel_sql);
+$lab_personnel_data = [];
+while ($row = $lab_personnel_result->fetch_assoc()) {
+    $lab_personnel_data[] = $row;
+}
+
+// Handle evidence received
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['evidence_received'])) {
+    $evidence_id = $_POST['evidence_id'];
+    $received_date = date("Y-m-d H:i:s");
+    $examiner_id = $_SESSION['user_id'];
+
+    // Update evidence received status to 'Received'
+    $sql_received = "UPDATE evidence SET received_status='Received', received_date=?, examiner_received=TRUE, examiner_id=? WHERE evidence_id=?";
+    $stmt = $conn->prepare($sql_received);
+    $stmt->bind_param("sii", $received_date, $examiner_id, $evidence_id);
+    $stmt->execute();
+    $stmt->close();
+
+    // Log the evidence received action
+    logAction($conn, $examiner_id, "Evidence Received", $evidence_id, $examiner_id, 3, 2); // Assuming 3 is Forensic Examiner role ID and 2 is Investigator role ID
+
+    echo "<script>alert('Evidence marked as received!'); window.location='forensic_examiner_dashboard.php';</script>";
+}
+
+// Handle evidence transfer to lab personnel
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['transfer_evidence'])) {
+    $evidence_id = $_POST['evidence_id'];
+    $transfer_date = date("Y-m-d H:i:s");
+    $examiner_id = $_SESSION['user_id'];
+    $lab_personnel_id = $_POST['lab_personnel_id'];
+
+    // Update evidence transfer status to 'Transferred'
+    $sql_transfer = "UPDATE evidence SET transfer_status='Transferred', transfer_date=?, lab_personnel_id=? WHERE evidence_id=?";
+    $stmt = $conn->prepare($sql_transfer);
+    $stmt->bind_param("sii", $transfer_date, $lab_personnel_id, $evidence_id);
+    $stmt->execute();
+    $stmt->close();
+
+    // Log the transfer action
+    logAction($conn, $examiner_id, "Evidence Transfer", $evidence_id, $examiner_id, 3, 4); // Assuming 3 is Forensic Examiner role ID and 4 is Lab Personnel role ID
+
+    echo "<script>alert('Evidence transferred to Lab Personnel!'); window.location='forensic_examiner_dashboard.php';</script>";
+}
+
+// Handle evidence update
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_evidence'])) {
+    $evidence_id = $_POST['evidence_id'];
+    $analysis_notes = trim($_POST['analysis_notes']);
+    $status = $_POST['status'];
+    $examiner_id = $_SESSION['user_id'];
+    $analysis_date = date("Y-m-d H:i:s");
+
+    // Update evidence details
+    $sql_update = "UPDATE evidence SET status=?, analysis_notes=?, analysis_date=?, examiner_id=? WHERE evidence_id=?";
+    $stmt = $conn->prepare($sql_update);
+    $stmt->bind_param("ssssi", $status, $analysis_notes, $analysis_date, $examiner_id, $evidence_id);
+    $stmt->execute();
+    $stmt->close();
+
+    echo "<script>alert('Evidence updated successfully!'); window.location='forensic_examiner_dashboard.php';</script>";
+}
+
+$conn->close();
 ?>
 
-
-
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chain of Custody - Login</title>
+    <title>Forensic Examiner Dashboard</title>
     <style>
-        /* General Styles */
-        body {
-            font-family: Arial, sans-serif;
-            background: url("images/logo.jpg") no-repeat center fixed;
-            background-size: cover;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-        }
-
-        /* Login Container */
-        .login-container {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
-            text-align: center;
-            width: 380px;
-            animation: fadeIn 0.8s ease-in-out;
-            transition: transform 0.3s;
-        }
-
-        .login-container:hover {
-            transform: scale(1.02);
-        }
-
-        /* Logo */
-        .logo {
-            width: 100px;
-            margin-bottom: 12px;
-        }
-
-        /* Input Fields */
-        input {
-            width: 100%;
-            padding: 12px;
-            margin: 8px 0;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            font-size: 16px;
-            transition: border 0.3s;
-        }
-
-        input:focus {
-            border: 1px solid #007bff;
-            outline: none;
-        }
-
-        /* Login Button */
-        .login-btn {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(to right, #007bff, #0056b3);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: background 0.3s, transform 0.2s;
-            font-size: 16px;
-            font-weight: bold;
-        }
-
-        .login-btn:hover {
-            background: linear-gradient(to right, #0056b3, #003d80);
-            transform: scale(1.05);
-        }
-
-        /* Error Message */
-        .error-message {
-            color: red;
-            font-size: 14px;
-            margin-top: 10px;
-            font-weight: bold;
-        }
-
-        /* Login Actions */
-        .login-actions {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 15px;
-        }
-
-        .login-actions a {
-            color: #007bff;
-            text-decoration: none;
-            font-size: 15px;
-            font-weight: bold;
-            transition: color 0.3s;
-            cursor: pointer;
-        }
-
-        .login-actions a:hover {
-            text-decoration: underline;
-            color: #00ffcc;
-        }
-
-        /* Fade-in Animation */
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: scale(0.9);
-            }
-            to {
-                opacity: 1;
-                transform: scale(1);
-            }
-        }
+        body { font-family: Arial, sans-serif; background-color: #1a1a2e; color: white; display: flex; }
+        .sidebar { width: 250px; background: #16213e; padding: 20px; position: fixed; height: 100vh; }
+        .sidebar button { width: 100%; padding: 10px; background: #0f3460; border: none; color: white; margin-bottom: 10px; cursor: pointer; }
+        .sidebar button:hover { background: #1b4b91; }
+        .content { margin-left: 270px; padding: 20px; width: calc(100% - 270px); }
+        .form-container { background: #0f3460; padding: 20px; border-radius: 8px; margin-top: 20px; }
+        input, textarea, select { width: 100%; padding: 8px; margin: 10px 0; }
+        table { width: 100%; margin-top: 10px; border-collapse: collapse; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
     </style>
 </head>
 <body>
+    <div class="sidebar">
+        <h2>Forensic Examiner</h2>
+        <button onclick="window.location.href='dashboard.php'">Main Dashboard</button>
+        <button onclick="toggleSection('received_evidence')">Received Evidence</button>
+        <button onclick="toggleSection('update_evidence')">Update Evidence</button>
+        <button onclick="toggleSection('transfer_evidence')">Transfer to Lab Personnel</button>
+        <button onclick="confirmLogout()">Logout</button>
+    </div>
+    <div class="content">
+        <h3>Welcome, Forensic Examiner!</h3>
 
-    <div class="login-container">
-        <img src="images/logo.jpg" alt="Chain of Custody Logo" class="logo">
-        <h2>Login</h2>
-        <form method="POST" action="login.php" id="loginForm">
-            <input type="text" id="username" name="username" placeholder="Username" required>
-            <input type="password" id="password" name="password" placeholder="Password" required>
-            <button type="submit" class="login-btn">Login</button>
-            <p class="error-message"><?php echo isset($error_message) ? $error_message : ''; ?></p>
-        </form>
+        <!-- Received Evidence Section -->
+        <div id="received_evidence" class="form-container" style="display:none;">
+            <h4>Received Evidence</h4>
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Evidence Name</th>
+                    <th>Description</th>
+                    <th>Case</th>
+                    <th>Investigator</th>
+                    <th>Actions</th>
+                </tr>
+                <?php foreach ($evidence_data as $evidence): ?>
+                <tr>
+                    <td><?php echo $evidence['evidence_id']; ?></td>
+                    <td><?php echo htmlspecialchars($evidence['evidence_name']); ?></td>
+                    <td><?php echo htmlspecialchars($evidence['description']); ?></td>
+                    <td><?php echo htmlspecialchars($evidence['case_name']); ?></td>
+                    <td><?php echo htmlspecialchars($evidence['investigator_name']); ?></td>
+                    <td>
+                        <?php if ($evidence['received_status'] === 'Pending'): ?>
+                        <form method="POST" action="">
+                            <input type="hidden" name="evidence_id" value="<?php echo $evidence['evidence_id']; ?>">
+                            <button type="submit" name="evidence_received">Mark as Received</button>
+                        </form>
+                        <?php else: ?>
+                        <span>Received</span>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </table>
+        </div>
 
-        <div class="login-actions">
-            <a id="forgot_password">Forgot Password?</a>
-            <a id="create-account">Create Account</a>
+        <!-- Update Evidence Section -->
+        <div id="update_evidence" class="form-container" style="display:none;">
+            <h4>Update Evidence</h4>
+            <form method="POST">
+                <label>Select Evidence:</label>
+                <select name="evidence_id" required>
+                    <option value="">-- Select Evidence --</option>
+                    <?php foreach ($evidence_data as $evidence): ?>
+                        <option value="<?php echo $evidence['evidence_id']; ?>"><?php echo htmlspecialchars($evidence['evidence_name']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+
+                <label>Status:</label>
+                <select name="status" required>
+                    <option value="Pending">Pending</option>
+                    <option value="Under Review">Under Review</option>
+                    <option value="Analysis Complete">Analysis Complete</option>
+                </select>
+
+                <label>Assign Lab Personnel:</label>
+                <select name="lab_personnel_id" required>
+                    <option value="">-- Select Lab Personnel --</option>
+                    <?php foreach ($lab_personnel_data as $lab_personnel): ?>
+                        <option value="<?php echo $lab_personnel['user_id']; ?>"><?php echo htmlspecialchars($lab_personnel['username']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+
+                <label>Analysis Notes:</label>
+                <textarea name="analysis_notes" placeholder="Enter analysis notes..." required></textarea>
+
+                <button type="submit" name="update_evidence">Update Evidence</button>
+            </form>
+        </div>
+
+        <!-- Transfer Evidence Section -->
+        <div id="transfer_evidence" class="form-container" style="display:none;">
+            <h4>Transfer Evidence to Lab Personnel</h4>
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Evidence Name</th>
+                    <th>Description</th>
+                    <th>Case</th>
+                    <th>Investigator</th>
+                    <th>Transfer Status</th>
+                    <th>Received Status</th>
+                    <th>Assigned Lab Personnel</th>
+                    <th>Actions</th>
+                </tr>
+                <?php foreach ($evidence_data as $evidence): ?>
+                <tr>
+                    <td><?php echo $evidence['evidence_id']; ?></td>
+                    <td><?php echo htmlspecialchars($evidence['evidence_name']); ?></td>
+                    <td><?php echo htmlspecialchars($evidence['description']); ?></td>
+                    <td><?php echo htmlspecialchars($evidence['case_name']); ?></td>
+                    <td><?php echo htmlspecialchars($evidence['investigator_name']); ?></td>
+                    <td><?php echo htmlspecialchars($evidence['transfer_status']); ?></td>
+                    <td><?php echo htmlspecialchars($evidence['received_status']); ?></td>
+                    <td>
+                        <?php
+                        if ($evidence['lab_personnel_id']) {
+                            $lab_personnel_name = "Unknown";
+                            foreach ($lab_personnel_data as $lab_personnel) {
+                                if ($lab_personnel['user_id'] == $evidence['lab_personnel_id']) {
+                                    $lab_personnel_name = $lab_personnel['username'];
+                                    break;
+                                }
+                            }
+                            echo htmlspecialchars($lab_personnel_name);
+                        } else {
+                            echo "Not Assigned";
+                        }
+                        ?>
+                    </td>
+                    <td>
+                        <?php if ($evidence['received_status'] === 'Received' && $evidence['transfer_status'] !== 'Transferred'): ?>
+                        <form method="POST" action="">
+                            <input type="hidden" name="evidence_id" value="<?php echo $evidence['evidence_id']; ?>">
+                            <select name="lab_personnel_id" required>
+                                <option value="">-- Select Lab Personnel --</option>
+                                <?php foreach ($lab_personnel_data as $lab_personnel): ?>
+                                    <option value="<?php echo $lab_personnel['user_id']; ?>"><?php echo htmlspecialchars($lab_personnel['username']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="submit" name="transfer_evidence">Transfer to Lab</button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </table>
         </div>
     </div>
 
     <script>
-        document.getElementById('forgot_password').addEventListener('click', function() {
-            window.location.href = 'forgot_password.php';
-        });
+        function toggleSection(sectionId) {
+            // Get all section elements
+            const sections = document.querySelectorAll('.form-container');
+            sections.forEach(function(section) {
+                if (section.id === sectionId) {
+                    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+                } else {
+                    section.style.display = 'none';
+                }
+            });
+        }
 
-        document.getElementById('create-account').addEventListener('click', function() {
-            window.location.href = 'register.php';
-        });
+        function confirmLogout() {
+            if (confirm("Are you sure you want to log out?")) {
+                window.location.href = "logout.php";
+            }
+        }
     </script>
-
 </body>
 </html>
