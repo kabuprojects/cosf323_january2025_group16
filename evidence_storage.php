@@ -28,6 +28,9 @@ if (!$submitted_result) {
     die("Error fetching submitted evidence: " . $conn->error);
 }
 
+// Initialize $tracking_result
+$tracking_result = null;
+
 // Fetch evidence tracking details with joined data
 $sql_tracking = "
     SELECT 
@@ -99,7 +102,6 @@ if (isset($_GET['search_id'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Evidence Storage Dashboard</title>
     <style>
-        /* Your original CSS styles remain unchanged */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -187,11 +189,26 @@ if (isset($_GET['search_id'])) {
         .search-bar input[type="submit"]:hover {
             background: #0F2A47;
         }
-        .disabled-button {
-            opacity: 0.5;
-            cursor: not-allowed;
+        .print-button {
+            margin-bottom: 20px;
+            padding: 10px 20px;
+            border-radius: 5px;
+            border: none;
+            background: #1B4F72;
+            color: white;
+            cursor: pointer;
+        }
+        .print-button:hover {
+            background: #0F2A47;
         }
     </style>
+    <!-- Include jsPDF, AutoTable, and FileSaver.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script>
+        window.jsPDF = window.jspdf.jsPDF; // Initialize jsPDF
+    </script>
 </head>
 <body>
 
@@ -199,10 +216,10 @@ if (isset($_GET['search_id'])) {
     <h2>Storage Dashboard</h2>
     <ul>
         <li><a href="dashboard.php">Main Dashboard</a></li>
-        <li><a href="#" onclick="toggleSection('received')">Received Evidence</a></li>
-        <li><a href="#" onclick="toggleSection('tracked')">Tracked Evidence</a></li>
-        <li><a href="#" onclick="toggleSection('storage')">Storage Location</a></li>
-        <li><a href="#" class="logout-btn" onclick="confirmLogout()">Logout</a></li>
+        <li><a href="#" onclick="toggleSection('received'); return false;">Received Evidence</a></li>
+        <li><a href="#" onclick="toggleSection('tracked'); return false;">Tracked Evidence</a></li>
+        <li><a href="#" onclick="toggleSection('storage'); return false;">Storage Location</a></li>
+        <li><a href="#" class="logout-btn" onclick="confirmLogout(); return false;">Logout</a></li>
     </ul>
 </div>
 
@@ -210,9 +227,10 @@ if (isset($_GET['search_id'])) {
     <h1>Evidence Storage Management</h1>
 
     <!-- Received Evidence Section -->
-    <div id="received" class="section">
+    <div id="received" class="section" style="display: none;">
         <h2>Received Evidence</h2>
-        <table>
+        <button class="print-button" onclick="exportToPDF('receivedTable', 'Received_Evidence.pdf')">Print as PDF</button>
+        <table id="receivedTable">
             <tr>
                 <th>Evidence ID</th>
                 <th>Evidence Name</th>
@@ -241,62 +259,10 @@ if (isset($_GET['search_id'])) {
     </div>
 
     <!-- Tracked Evidence Section -->
-    <!-- Tracked Evidence Section -->
-<div id="tracked" class="section">
-    <h2>Tracked Evidence</h2>
-    <table>
-        <tr>
-            <th>Evidence ID</th>
-            <th>Evidence Name</th>
-            <th>Case Name</th>
-            <th>Collected By</th>
-            <th>Transferred To</th>
-            <th>Current Status</th>
-            <th>Collection Date</th>
-            <th>Storage Location</th>
-        </tr>
-        <?php
-        if ($tracking_result->num_rows > 0) {
-            while ($row = $tracking_result->fetch_assoc()) {
-                echo "<tr>
-                        <td>{$row['evidence_id']}</td>
-                        <td>{$row['evidence_name']}</td>
-                        <td>" . ($row['case_name'] ?? 'N/A') . "</td>
-                        <td>" . ($row['collected_by'] ?? 'N/A') . "</td>
-                        <td>" . ($row['transferred_to'] ?? 'N/A') . "</td>
-                        <td>{$row['status']}</td>
-                        <td>" . ($row['collection_date'] ?? 'N/A') . "</td>
-                        <td>{$row['storage_location']}</td>
-                      </tr>";
-            }
-        } else {
-            echo "<tr><td colspan='8'>No records found</td></tr>";
-        }
-        ?>
-    </table>
-</div>
-
-    <!-- Storage Location Section -->
-    <!-- Storage Location Section -->
-<div id="storage" class="section">
-    <h2>Storage Location</h2>
-    <div class="search-bar">
-        <form method="GET" action="">
-            <select name="search_id" required>
-                <option value="">Select Evidence ID</option>
-                <?php
-                if ($evidence_ids_result->num_rows > 0) {
-                    while ($row = $evidence_ids_result->fetch_assoc()) {
-                        echo "<option value='{$row['evidence_id']}'>{$row['evidence_id']}</option>";
-                    }
-                }
-                ?>
-            </select>
-            <input type="submit" value="Search">
-        </form>
-    </div>
-    <?php if (isset($search_result)): ?>
-        <table>
+    <div id="tracked" class="section" style="display: none;">
+        <h2>Tracked Evidence</h2>
+        <button class="print-button" onclick="exportToPDF('trackedTable', 'Tracked_Evidence.pdf')">Print as PDF</button>
+        <table id="trackedTable">
             <tr>
                 <th>Evidence ID</th>
                 <th>Evidence Name</th>
@@ -308,8 +274,8 @@ if (isset($_GET['search_id'])) {
                 <th>Storage Location</th>
             </tr>
             <?php
-            if ($search_result->num_rows > 0) {
-                while ($row = $search_result->fetch_assoc()) {
+            if ($tracking_result && $tracking_result->num_rows > 0) {
+                while ($row = $tracking_result->fetch_assoc()) {
                     echo "<tr>
                             <td>{$row['evidence_id']}</td>
                             <td>{$row['evidence_name']}</td>
@@ -322,20 +288,75 @@ if (isset($_GET['search_id'])) {
                           </tr>";
                 }
             } else {
-                echo "<tr><td colspan='8'>No records found for the given Evidence ID</td></tr>";
+                echo "<tr><td colspan='8'>No tracked evidence found.</td></tr>";
             }
             ?>
         </table>
-    <?php endif; ?>
+    </div>
+
+    <!-- Storage Location Section -->
+    <div id="storage" class="section" style="display: none;">
+        <h2>Storage Location</h2>
+        <div class="search-bar">
+            <form method="GET" action="">
+                <select name="search_id" required>
+                    <option value="">Select Evidence ID</option>
+                    <?php
+                    if ($evidence_ids_result->num_rows > 0) {
+                        while ($row = $evidence_ids_result->fetch_assoc()) {
+                            echo "<option value='{$row['evidence_id']}'>{$row['evidence_id']}</option>";
+                        }
+                    }
+                    ?>
+                </select>
+                <input type="submit" value="Search">
+            </form>
+        </div>
+        <?php if (isset($search_result)): ?>
+            <table>
+                <tr>
+                    <th>Evidence ID</th>
+                    <th>Evidence Name</th>
+                    <th>Case Name</th>
+                    <th>Collected By</th>
+                    <th>Transferred To</th>
+                    <th>Current Status</th>
+                    <th>Collection Date</th>
+                    <th>Storage Location</th>
+                </tr>
+                <?php
+                if ($search_result->num_rows > 0) {
+                    while ($row = $search_result->fetch_assoc()) {
+                        echo "<tr>
+                                <td>{$row['evidence_id']}</td>
+                                <td>{$row['evidence_name']}</td>
+                                <td>" . ($row['case_name'] ?? 'N/A') . "</td>
+                                <td>" . ($row['collected_by'] ?? 'N/A') . "</td>
+                                <td>" . ($row['transferred_to'] ?? 'N/A') . "</td>
+                                <td>{$row['status']}</td>
+                                <td>" . ($row['collection_date'] ?? 'N/A') . "</td>
+                                <td>{$row['storage_location']}</td>
+                              </tr>";
+                    }
+                } else {
+                    echo "<tr><td colspan='8'>No records found for the given Evidence ID</td></tr>";
+                }
+                ?>
+            </table>
+        <?php endif; ?>
+    </div>
 </div>
 
 <script>
 function toggleSection(section) {
-    var element = document.getElementById(section);
-    if (element.style.display === "none" || element.style.display === "") {
-        element.style.display = "block"; // Show the section
+    // Get the selected section
+    var selectedSection = document.getElementById(section);
+
+    // Toggle visibility
+    if (selectedSection.style.display === "none" || selectedSection.style.display === "") {
+        selectedSection.style.display = "block"; // Show the section
     } else {
-        element.style.display = "none"; // Hide the section
+        selectedSection.style.display = "none"; // Hide the section
     }
 }
 
@@ -346,24 +367,16 @@ function confirmLogout() {
     }
 }
 
-function handleEdit(evidenceId) {
-    if ('<?php echo $role_id; ?>' != 4) { // Only System Admin can edit
-        alert("You do not have permission to edit evidence.");
+// Function to export table data to PDF
+function exportToPDF(tableId, fileName) {
+    const table = document.getElementById(tableId);
+    if (table.rows.length <= 1) { // Check if the table has no data (only headers)
+        alert("No data to export!");
         return;
     }
-    // Redirect to edit page or show edit modal
-    alert("Edit Evidence ID: " + evidenceId);
-}
-
-function handleDelete(evidenceId) {
-    if ('<?php echo $role_id; ?>' != 4) { // Only System Admin can delete
-        alert("You do not have permission to delete evidence.");
-        return;
-    }
-    // Confirm deletion and delete evidence
-    if (confirm("Are you sure you want to delete this evidence?")) {
-        alert("Delete Evidence ID: " + evidenceId);
-    }
+    const doc = new jsPDF();
+    doc.autoTable({ html: `#${tableId}` }); // Use template literal
+    doc.save(fileName);
 }
 </script>
 

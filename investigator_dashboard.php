@@ -1,9 +1,9 @@
-<?php     
+<?php
 // Database connection
-$host = "localhost"; 
-$username = "root"; 
-$password = ""; 
-$dbname = "chain_of_custody_db"; 
+$host = "localhost";
+$username = "root";
+$password = "";
+$dbname = "chain_of_custody_db";
 session_start();
 
 // Check if the user is logged in
@@ -25,6 +25,7 @@ if ($conn->connect_error) {
 // Set Kenyan timezone
 date_default_timezone_set('Africa/Nairobi');
 
+// Handle transferring evidence to forensic examiner
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['transfer_evidence_id'])) {
     $evidence_id = $_POST['transfer_evidence_id'];
     $current_user_id = $_SESSION['user_id']; // Get the current user's ID
@@ -39,7 +40,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['transfer_evidence_id']
         $assigned_examiner_id = $examiner['user_id'];
 
         // Update the evidence status, assign to examiner, and transfer
-        $update_sql = "UPDATE evidence SET status = 'transferred', assigned_to = ?, assigned_examiner_id = ? WHERE evidence_id = ?";
+        $update_sql = "UPDATE evidence SET status = 'transferred', assigned_to = ?, assigned_examiner_id = ?, transfer_status = 'Transferred to Lab' WHERE evidence_id = ?";
         $stmt = $conn->prepare($update_sql);
         $stmt->bind_param("ssi", $transfer_to_role, $assigned_examiner_id, $evidence_id);
 
@@ -89,7 +90,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['evidence_name']) && is
     $investigator_id = $_SESSION['user_id']; // Get the current user's ID (investigator)
 
     // Insert the new evidence into the database
-    $insert_sql = "INSERT INTO evidence (evidence_name, description, collection_date, case_id, investigator_id, status) VALUES (?, ?, ?, ?, ?, 'collected')";
+    $insert_sql = "INSERT INTO evidence (evidence_name, description, collection_date, case_id, investigator_id, status, received_status, transfer_status) 
+                   VALUES (?, ?, ?, ?, ?, 'collected', 'Pending', 'Not Transferred')";
     $stmt = $conn->prepare($insert_sql);
     $stmt->bind_param("ssssi", $evidence_name, $description, $collection_date, $case_id, $investigator_id);
 
@@ -110,7 +112,7 @@ while ($case = $cases_result->fetch_assoc()) {
 }
 
 // Fetch evidence
-$evidence_sql = "SELECT e.evidence_id, e.evidence_name, e.description, e.collection_date, c.case_name, e.status 
+$evidence_sql = "SELECT e.evidence_id, e.evidence_name, e.description, e.collection_date, c.case_name, e.status, e.received_status 
                  FROM evidence e 
                  JOIN cases c ON e.case_id = c.case_id";
 
@@ -289,6 +291,7 @@ $conn->close();
                     <th>Description</th>
                     <th>Collection Date</th>
                     <th>Status</th>
+                    <th>Received Status</th>
                     <th>Action</th>
                 </tr>
                 <?php foreach ($evidence_data as $evidence): ?>
@@ -298,6 +301,7 @@ $conn->close();
                         <td><?php echo htmlspecialchars($evidence['description']); ?></td>
                         <td><?php echo htmlspecialchars($evidence['collection_date']); ?></td>
                         <td><?php echo htmlspecialchars($evidence['status']); ?></td>
+                        <td><?php echo htmlspecialchars($evidence['received_status']); ?></td>
                         <td>
                             <form method="POST">
                                 <input type="hidden" name="transfer_evidence_id" value="<?php echo $evidence['evidence_id']; ?>">
@@ -329,3 +333,11 @@ $conn->close();
 
 </body>
 </html>
+
+
+
+
+
+
+
+

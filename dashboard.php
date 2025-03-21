@@ -1,4 +1,4 @@
-<?php
+<?php   
 // Include database connection and start session
 require_once 'db.php';
 session_start();
@@ -23,24 +23,9 @@ if ($result->num_rows > 0) {
     die("Role not found.");
 }
 
-// Role-based dashboard content with user's name
-switch ($role['role_name']) {
-    case 'Investigator':
-        $role_content = "Welcome $username , you can view case details and manage investigations.";
-        break;
-    case 'Digital Forensic Examiner':
-        $role_content = "Welcome $username, you can analyze evidence and view forensic reports.";
-        break;
-    case 'Lab Personnel':
-        $role_content = "Welcome $username, you can manage lab results and oversee testing.";
-        break;
-    case 'System Administrator':
-        $role_content = "Welcome $username, you can manage users and system settings.";
-        break;
-    default:
-        $role_content = "Welcome $username,";
-        break;
-}
+// Role-based dashboard content
+$role_content = "Welcome, $username!";
+$allowed_role = strtolower(str_replace(' ', '_', $role['role_name']));
 ?>
 
 <!DOCTYPE html>
@@ -56,28 +41,26 @@ switch ($role['role_name']) {
       display: flex;
       flex-direction: column;
       height: 100vh;
-      background-image: url('images/background.jpg'); /* Update with your image path */
+      background-image: url('images/background.jpg');
       background-size: cover;
       background-position: center;
       background-repeat: no-repeat;
     }
 
-    /* Navigation bar */
     .navbar {
-      background-color: #16213e;
+      background-color: #2d3748;
       padding: 1rem;
       display: flex;
       flex-direction: column;
       align-items: center;
       color: white;
-      width: 180px; /* Expanded sidebar */
+      width: 180px;
       position: fixed;
       height: 100%;
       transition: width 0.3s ease-in-out;
       overflow: hidden;
     }
 
-    /* Hamburger menu and Home text */
     .hamburger-container {
       display: flex;
       align-items: center;
@@ -99,38 +82,6 @@ switch ($role['role_name']) {
       transition: transform 0.3s, opacity 0.3s;
     }
 
-    .hamburger-container span {
-      margin-left: 10px;
-      font-size: 1.2rem;
-      color: white;
-    }
-
-    /* Transform hamburger to X */
-    .navbar.open .hamburger div:nth-child(1) {
-      transform: rotate(45deg) translate(5px, 5px);
-    }
-
-    .navbar.open .hamburger div:nth-child(2) {
-      opacity: 0;
-    }
-
-    .navbar.open .hamburger div:nth-child(3) {
-      transform: rotate(-45deg) translate(5px, -5px);
-    }
-
-    /* Sidebar expansion */
-    .navbar.open {
-      width: 200px;
-    }
-
-    /* Menu items */
-    .menu {
-      visibility: hidden;
-      opacity: 0;
-      transition: opacity 0.3s ease-in-out;
-      text-align: center;
-    }
-
     .navbar.open .menu {
       visibility: visible;
       opacity: 1;
@@ -145,25 +96,56 @@ switch ($role['role_name']) {
       cursor: pointer;
     }
 
-    .navbar a:hover {
-      color: #68d391;
+    .menu {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
 
-    /* Roles dropdown */
-    .roles-btn {
-      margin-top: 10px;
-      background-color: #10b981; /* Green for evidence storage button */
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    /* Styles for the role and evidence storage buttons */
+    .menu a {
+      display: block;
+      width: 100%;
+      text-align: center;
       padding: 12px;
+      margin: 5px 0;
+      background-color: #4b5563;
       border-radius: 8px;
       transition: background-color 0.3s;
       font-size: 1.1rem;
       color: white;
-      text-decoration: none;
     }
 
+    .menu a:hover {
+      background-color: #374151;
+    }
+
+    /* Adding symbols to the buttons */
+    .roles-btn {
+      background-color: #1d4ed8; /* Blue for roles button */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .roles-btn:before {
+      content: '👥'; /* Add a user group icon */
+      margin-right: 10px;
+    }
+
+    .evidence-storage-btn {
+      background-color: #10b981; /* Green for evidence storage button */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .evidence-storage-btn:before {
+      content: '📦'; /* Add a package box icon */
+      margin-right: 10px;
+    }
+
+    /* Roles list styles */
     .roles-list {
       display: none;
       flex-direction: column;
@@ -172,7 +154,7 @@ switch ($role['role_name']) {
 
     .roles-list .icon {
       width: 70px;
-      height: 50px;
+      height: 70px;
       background-color: #374151;
       border-radius: 8px;
       display: flex;
@@ -190,81 +172,45 @@ switch ($role['role_name']) {
       background-color: #4b5563;
     }
 
-    .roles-list .icon span {
-      font-size: 0.75rem;
-      color: #fff;
-    }
-
-    /* Main Content */
     .main-content {
       flex: 1;
       padding: 2rem;
       overflow-y: auto;
-      margin-left: 280px; /* Space for sidebar */
+      margin-left: 180px;
       color: white;
+      position: relative;
     }
 
-    .main-content h1 {
-      margin-bottom: 1rem;
+    /* Logout button styling */
+    .logout-container {
+      position: absolute;
+      top: 20px;
+      right: 20px;
     }
 
-    /* Logout button */
     .logout-btn {
-      margin-top: auto; /* Push to the bottom */
-      margin-bottom: 20px;
-      text-align: center;
-    }
-
-    .logout-btn a {
-      text-decoration: none;
+      background-color: #ff4d4d;
       color: white;
-      font-size: 1.1rem;
-      transition: color 0.3s;
-    }
-
-    .logout-btn a:hover {
-      color: #ff6b6b; /* Red color for emphasis */
-    }
-
-    /* Evidence Storage Button */
-    .evidence-storage-btn {
-      background-color: #10b981; /* Green for evidence storage button */
+      border: none;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 16px;
+      border-radius: 5px;
+      transition: background 0.3s;
       display: flex;
       align-items: center;
-      justify-content: center;
-      padding: 12px;
-      margin: 5px 0;
-      border-radius: 8px;
-      transition: background-color 0.3s;
-      font-size: 1.1rem;
-      color: white;
-      text-decoration: none;
     }
 
-    .evidence-storage-btn:hover {
-      background-color: #0d8f63;
+    .logout-btn:hover {
+      background-color: #cc0000;
     }
 
-    .evidence-storage-btn:before {
-      content: '📦'; /* Add a package box icon */
-      margin-right: 10px;
-    }
-
-    footer {
-      background-color: #00193186;
-      color: white;
-      text-align: center;
-      padding: 1rem 0;
-      position: relative; /* Needed for sticky footer */
-      bottom: 0; /* Stick to the bottom */
-      width: 83%;
-      left: 17%;
-      top: 51%;
+    .logout-btn i {
+      margin-right: 8px;
     }
   </style>
 </head>
 <body>
-  <!-- Navigation Bar -->
   <div class="navbar" id="navbar">
     <div class="hamburger-container" onclick="toggleMenu()">
       <div class="hamburger">
@@ -274,85 +220,68 @@ switch ($role['role_name']) {
       </div>
       <span>HOME</span>
     </div>
-    <div class="menu">
+    <div class="menu" id="menu" style="display: none;">
+      <!-- Roles button -->
       <a href="#" class="roles-btn" onclick="toggleRoles()">Roles</a>
-      <div class="roles-list" id="roles-list">
+      <div class="roles-list" id="roles-list" style="display: none;">
         <div class="icon" onclick="navigateTo('investigator')" title="Investigator">
-          🔍
-          <span>Investigator</span>
+          🔍<span>Investigator</span>
         </div>
         <div class="icon" onclick="navigateTo('forensic_examiner')" title="Digital Forensic Examiner">
-          🧪
-          <span>Forensic Examiner</span>
+          🧪<span>Forensic Examiner</span>
         </div>
         <div class="icon" onclick="navigateTo('lab_personnel')" title="Lab Personnel">
-          🧫
-          <span>Lab Personnel</span>
+          🧫<span>Lab Personnel</span>
         </div>
         <div class="icon" onclick="navigateTo('system_admin')" title="System Administrator">
-          ⚙️
-          <span>System Admin</span>
+          ⚙<span>System Admin</span>
         </div>
       </div>
-      <!-- Evidence Storage Button -->
+      <!-- Evidence Storage button -->
       <a href="evidence_storage.php" class="evidence-storage-btn">Evidence Storage</a>
-      <!-- Logout Button -->
-      <div class="logout-btn">
-        <a href="logout.php">Logout</a>
-      </div>
     </div>
   </div>
 
-  <div class="overlay">
-    <!-- Main Content -->
-    <div class="main-content">
-      <h1><?php echo $role_content; ?></h1>
-      <p>You're logged in as a <?php echo htmlspecialchars($role['role_name']); ?></p>
+  <div class="main-content">
+    <h1><?php echo $role_content; ?></h1>
+    <p>You're logged in as a <?php echo htmlspecialchars($role['role_name']); ?></p>
+
+    <!-- Logout Button -->
+    <div class="logout-container">
+      <button class="logout-btn" onclick="confirmLogout()">
+        🚪 Logout
+      </button>
     </div>
   </div>
-  <footer>
-    <p>&copy; 2025 team16(linet,anette,naftal)</p>
+<footer >
+  <p>&copy;2025 team 16 (Linet,Annette,Naftal)</p>
   </footer>
-
+  
   <script>
     function toggleMenu() {
-      const navbar = document.getElementById('navbar');
-      const menu = document.querySelector('.menu');
-      navbar.classList.toggle('open');
-
-      // Toggle menu visibility
-      if (navbar.classList.contains('open')) {
-        menu.style.visibility = 'visible';
-        menu.style.opacity = '1';
-      } else {
-        menu.style.visibility = 'hidden';
-        menu.style.opacity = '0';
-      }
-    }
-
-    function navigateTo(role) {
-      switch (role) {
-        case 'investigator':
-          window.location.href = 'investigator.php';
-          break;
-        case 'forensic_examiner':
-          window.location.href = 'forensic examiner.php';
-          break;
-        case 'lab_personnel':
-          window.location.href = 'lab personnel.php';
-          break;
-        case 'system_admin':
-          window.location.href = 'system admin.php';
-          break;
-        default:
-          alert('Invalid role selected.');
-          break;
-      }
+      let menu = document.getElementById("menu");
+      menu.style.display = menu.style.display === "none" ? "block" : "none";
     }
 
     function toggleRoles() {
-      const rolesList = document.getElementById('roles-list');
-      rolesList.style.display = rolesList.style.display === 'flex' ? 'none' : 'flex';
+      let rolesList = document.getElementById("roles-list");
+      rolesList.style.display = rolesList.style.display === "none" ? "flex" : "none";
+    }
+
+    function navigateTo(role) {
+      let allowedRole = "<?php echo $allowed_role; ?>";
+      if (role !== allowedRole) {
+        alert("Access Denied: You are not authorized to access this dashboard.");
+        return;
+      }
+      window.location.href = role + "_dashboard.php";
+    }
+
+    function confirmLogout() {
+      let confirmAction = confirm("Are you sure you want to log out?");
+      if (confirmAction) {
+        window.location.href = "logout.php";
+      }
     }
   </script>
 </body>

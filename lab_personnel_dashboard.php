@@ -12,39 +12,6 @@ if (!$conn) {
     die("Connection failed: " . mysqli_connect_error());
 }
 
-// Function to log actions into the system_logs table
-function logAction($conn, $user_id, $action, $evidence_id, $performed_by, $from_role, $to_role) {
-    $ip_address = $_SERVER['REMOTE_ADDR'];
-    $user_agent = $_SERVER['HTTP_USER_AGENT'];
-    $log_date = date("Y-m-d H:i:s");
-
-    // Fetch role names from the database
-    $from_role_name = getRoleName($conn, $from_role);
-    $to_role_name = getRoleName($conn, $to_role);
-
-    // Format the action message dynamically
-    $action_message = "Evidence ID $evidence_id $action by $from_role_name (User ID: $performed_by)";
-
-    $sql = "INSERT INTO system_logs (user_id, action, ip_address, user_agent, log_date, evidence_id, performed_by, from_role, to_role)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("issssiiii", $user_id, $action_message, $ip_address, $user_agent, $log_date, $evidence_id, $performed_by, $from_role, $to_role);
-    $stmt->execute();
-    $stmt->close();
-}
-
-// Function to get role name based on role ID from the database
-function getRoleName($conn, $role_id) {
-    $sql = "SELECT role_name FROM roles WHERE role_id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $role_id);
-    $stmt->execute();
-    $stmt->bind_result($role_name);
-    $stmt->fetch();
-    $stmt->close();
-    return $role_name ?? "Unknown Role";
-}
-
 // Clear the message when the page loads (not a form submission)
 if ($_SERVER["REQUEST_METHOD"] != "POST") {
     $message = "";
@@ -64,12 +31,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['store_evidence'])) {
             // Update lab_status to 'Stored' and storage_location
             $update_query = "UPDATE evidence SET lab_status='Stored', storage_location='$storage_location' WHERE evidence_id='$evidence_id'";
             if (mysqli_query($conn, $update_query)) {
-                // Log the storage action
-                $user_id = $_SESSION['user_id']; // Lab Personnel performing the action
-                $from_role = 4; // Lab Personnel role ID
-                $to_role = 4;   // Lab Personnel role ID (no transfer, just storage)
-                logAction($conn, $user_id, "stored", $evidence_id, $user_id, $from_role, $to_role);
-
                 $message = "Evidence stored successfully!";
             } else {
                 $message = "Error storing evidence: " . mysqli_error($conn);
@@ -93,15 +54,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['prepare_evidence'])) {
     // Update evidence preparation details
     $update_query = "UPDATE evidence SET storage_location='$storage_location', court_prep_status='$court_prep_status', report_generated='$report_generated', notes='$notes' WHERE evidence_id='$evidence_id'";
     if (mysqli_query($conn, $update_query)) {
-        // Log the preparation action
-        $user_id = $_SESSION['user_id']; // Lab Personnel performing the action
-        $from_role = 4; // Lab Personnel role ID
-        $to_role = 4;   // Lab Personnel role ID (no transfer, just preparation)
-        logAction($conn, $user_id, "prepared", $evidence_id, $user_id, $from_role, $to_role);
-
         $message = "Evidence preparation details updated successfully!";
     } else {
         $message = "Error updating evidence preparation details: " . mysqli_error($conn);
+    }
+}
+
+// Handle Receive Evidence Action
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['receive_evidence'])) {
+    $evidence_id = intval($_POST['evidence_id']);
+
+    // Update received_lab_personnel_status to 'Received'
+    $update_query = "UPDATE evidence SET received_lab_personnel_status='Received' WHERE evidence_id='$evidence_id'";
+    if (mysqli_query($conn, $update_query)) {
+        $message = "Evidence received successfully!";
+    } else {
+        $message = "Error receiving evidence: " . mysqli_error($conn);
     }
 }
 
@@ -113,20 +81,7 @@ $evidence_data = [];
 while ($row = mysqli_fetch_assoc($result)) {
     $evidence_data[$row['evidence_id']] = $row['description'];
 }
-
-// Log received evidence when the "Received Evidence" section is accessed
-if (isset($_GET['section']) && $_GET['section'] == 'received_evidence') {
-    $user_id = $_SESSION['user_id']; // Lab Personnel performing the action
-    $from_role = 3; // Forensic Examiner role ID
-    $to_role = 4;   // Lab Personnel role ID
-
-    // Log the receipt of evidence
-    foreach ($evidence_data as $evidence_id => $description) {
-        logAction($conn, $user_id, "received", $evidence_id, $user_id, $from_role, $to_role);
-    }
-}
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -144,7 +99,7 @@ if (isset($_GET['section']) && $_GET['section'] == 'received_evidence') {
             color: white; /* White text */
         }
         .sidebar {
-            width: 250px;
+            width: 200px;
             background: #2c3e50; /* Dark sidebar background */
             color: white;
             padding: 20px;
@@ -277,6 +232,7 @@ if (isset($_GET['section']) && $_GET['section'] == 'received_evidence') {
                 // Hide all sections
                 document.getElementById("received_evidence").style.display = 'none';
                 document.getElementById("prepare_evidence").style.display = 'none';
+                document.getElementById("transfer_evidence").style.display = 'none';
 
                 // Show the selected section
                 sectionElement.style.display = 'block';
@@ -297,6 +253,7 @@ if (isset($_GET['section']) && $_GET['section'] == 'received_evidence') {
         window.onload = function() {
             document.getElementById("received_evidence").style.display = 'none';
             document.getElementById("prepare_evidence").style.display = 'none';
+            document.getElementById("transfer_evidence").style.display = 'none';
         };
 
         // Function to populate Evidence Description based on selected Evidence ID
@@ -322,113 +279,179 @@ if (isset($_GET['section']) && $_GET['section'] == 'received_evidence') {
                 window.location.href = 'dashboard.php';
             }
         }
+
+        // Function to handle receiving evidence
+        function receiveEvidence(evidenceId) {
+            if (confirm("Are you sure you want to mark this evidence as received?")) {
+                // Submit the form to update the database
+                document.getElementById("receive_evidence_form_" + evidenceId).submit();
+            }
+        }
     </script>
 </head>
 <body>
-    <div class="sidebar">
-        <h2>Lab Personnel</h2>
-        <button onclick="window.location.href='dashboard.php'">Main Dashboard</button>
-        <button onclick="toggleSection('received_evidence')">Received Evidence</button>
-        <button onclick="toggleSection('prepare_evidence')">Prepare Evidence</button>
-        <button onclick="confirmLogout()">Logout</button>
+
+<div class="sidebar">
+    <h2>Lab Personnel</h2>
+    <button onclick="window.location.href='dashboard.php'">Main Dashboard</button>
+    <button onclick="toggleSection('received_evidence')">Received Evidence</button>
+    <button onclick="toggleSection('prepare_evidence')">Prepare Evidence</button>
+    <button onclick="toggleSection('transfer_evidence')">Transfer Evidence</button>
+    <button onclick="confirmLogout()">Logout</button>
+</div>
+
+<div class="content">
+    <h1>Welcome to Lab Personnel Dashboard</h1>
+
+    <!-- Success Message -->
+    <?php if ($_SERVER["REQUEST_METHOD"] == "POST" && !empty($message)) { ?>
+        <div class="success-message" id="success-message">
+            <?php echo $message; ?>
+        </div>
+        <script>showMessage();</script>
+    <?php } ?>
+
+    <!-- Received Evidence Section -->
+    <div id="received_evidence" style="display: none;">
+        <h2>Received Evidence</h2>
+        <table>
+            <tr>
+                <th>Evidence ID</th>
+                <th>Evidence Name</th>
+                <th>Description</th>
+                <th>Collection Date</th>
+                <th>Case ID</th>
+                <th>Receive Evidence</th>
+            </tr>
+            <?php
+            mysqli_data_seek($result, 0);
+            if ($result && mysqli_num_rows($result) > 0) {
+                while ($row = mysqli_fetch_assoc($result)) { ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($row['evidence_id']); ?></td>
+                        <td><?php echo htmlspecialchars($row['evidence_name']); ?></td>
+                        <td><?php echo htmlspecialchars($row['description']); ?></td>
+                        <td><?php echo htmlspecialchars($row['collection_date']); ?></td>
+                        <td><?php echo htmlspecialchars($row['case_id']); ?></td>
+                        <td>
+                            <?php if ($row['received_lab_personnel_status'] != 'Received') { ?>
+                                <form id="receive_evidence_form_<?php echo $row['evidence_id']; ?>" method="post" action="">
+                                    <input type="hidden" name="evidence_id" value="<?php echo $row['evidence_id']; ?>">
+                                    <button type="submit" name="receive_evidence" class="store-button">Receive</button>
+                                </form>
+                            <?php } else { ?>
+                                <span style="color: green;">Received</span>
+                            <?php } ?>
+                        </td>
+                    </tr>
+                <?php }
+            } else { ?>
+                <tr><td colspan="6">No records found.</td></tr>
+            <?php } ?>
+        </table>
     </div>
 
-    <div class="content">
-        <h1>Welcome to Lab Personnel Dashboard</h1>
+    <!-- Prepare Evidence Section -->
+    <div id="prepare_evidence" style="display: none;">
+        <h2>Prepare Evidence</h2>
+        <div class="form-container">
+            <form method="post" action="">
+                <label for="evidence_id">Evidence ID:</label>
+                <select name="evidence_id" id="evidence_id" onchange="populateDescription()" required>
+                    <option value="">Select Evidence ID</option>
+                    <?php
+                    mysqli_data_seek($result, 0);
+                    if ($result && mysqli_num_rows($result) > 0) {
+                        while ($row = mysqli_fetch_assoc($result)) { ?>
+                            <option value="<?php echo htmlspecialchars($row['evidence_id']); ?>">
+                                <?php echo htmlspecialchars($row['evidence_id']); ?>
+                            </option>
+                        <?php }
+                    } ?>
+                </select>
 
-        <!-- Success Message -->
-        <?php if ($_SERVER["REQUEST_METHOD"] == "POST" && !empty($message)) { ?>
-            <div class="success-message" id="success-message">
-                <?php echo $message; ?>
-            </div>
-            <script>showMessage();</script>
-        <?php } ?>
+                <label for="evidence_description">Evidence Description:</label>
+                <input type="text" id="evidence_description" name="evidence_description" readonly>
 
-        <!-- Received Evidence Section -->
-        <div id="received_evidence" style="display: none;">
-            <h2>Received Evidence</h2>
-            <table>
-                <tr>
-                    <th>Evidence ID</th>
-                    <th>Evidence Name</th>
-                    <th>Description</th>
-                    <th>Collection Date</th>
-                    <th>Case ID</th>
-                </tr>
-                <?php
-                mysqli_data_seek($result, 0);
-                if ($result && mysqli_num_rows($result) > 0) {
-                    while ($row = mysqli_fetch_assoc($result)) { ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($row['evidence_id']); ?></td>
-                            <td><?php echo htmlspecialchars($row['evidence_name']); ?></td>
-                            <td><?php echo htmlspecialchars($row['description']); ?></td>
-                            <td><?php echo htmlspecialchars($row['collection_date']); ?></td>
-                            <td><?php echo htmlspecialchars($row['case_id']); ?></td>
-                        </tr>
-                    <?php }
-                } else { ?>
-                    <tr><td colspan="5">No records found.</td></tr>
-                <?php } ?>
-            </table>
-        </div>
+                <label for="storage_location">Storage Location:</label>
+                <select name="storage_location" id="storage_location" required>
+                    <option value="">Select Storage Location</option>
+                    <option value="Cloud Storage - AWS S3">Cloud Storage - AWS S3</option>
+                    <option value="Cloud Storage - Google Drive">Cloud Storage - Google Drive</option>
+                    <option value="On-Premises Server - Server A">On-Premises Server - Server A</option>
+                    <option value="On-Premises Server - Server B">On-Premises Server - Server B</option>
+                    <option value="External Hard Drive - Drive 1">External Hard Drive - Drive 1</option>
+                    <option value="External Hard Drive - Drive 2">External Hard Drive - Drive 2</option>
+                    <option value="Network Attached Storage (NAS)">Network Attached Storage (NAS)</option>
+                    <option value="Encrypted USB Drive">Encrypted USB Drive</option>
+                </select>
 
-        <!-- Prepare Evidence Section -->
-        <div id="prepare_evidence" style="display: none;">
-            <h2>Prepare Evidence</h2>
-            <div class="form-container">
-                <form method="post" action="">
-                    <label for="evidence_id">Evidence ID:</label>
-                    <select name="evidence_id" id="evidence_id" onchange="populateDescription()" required>
-                        <option value="">Select Evidence ID</option>
-                        <?php
-                        mysqli_data_seek($result, 0);
-                        if ($result && mysqli_num_rows($result) > 0) {
-                            while ($row = mysqli_fetch_assoc($result)) { ?>
-                                <option value="<?php echo htmlspecialchars($row['evidence_id']); ?>">
-                                    <?php echo htmlspecialchars($row['evidence_id']); ?>
-                                </option>
-                            <?php }
-                        } ?>
-                    </select>
+                <label>Court Prep Status:</label>
+                <div>
+                    <input type="radio" id="pending" name="court_prep_status" value="Pending" required>
+                    <label for="pending">Pending</label>
+                    <input type="radio" id="completed" name="court_prep_status" value="Completed">
+                    <label for="completed">Completed</label>
+                </div>
 
-                    <label for="evidence_description">Evidence Description:</label>
-                    <input type="text" id="evidence_description" name="evidence_description" readonly>
+                <label for="report_generated">Report Generated:</label>
+                <div>
+                    <input type="checkbox" id="report_generated" name="report_generated" value="1">
+                    <label for="report_generated">Yes</label>
+                </div>
 
-                    <label for="storage_location">Storage Location:</label>
-                    <select name="storage_location" id="storage_location" required>
-                        <option value="">Select Storage Location</option>
-                        <option value="Cloud Storage - AWS S3">Cloud Storage - AWS S3</option>
-                        <option value="Cloud Storage - Google Drive">Cloud Storage - Google Drive</option>
-                        <option value="On-Premises Server - Server A">On-Premises Server - Server A</option>
-                        <option value="On-Premises Server - Server B">On-Premises Server - Server B</option>
-                        <option value="External Hard Drive - Drive 1">External Hard Drive - Drive 1</option>
-                        <option value="External Hard Drive - Drive 2">External Hard Drive - Drive 2</option>
-                        <option value="Network Attached Storage (NAS)">Network Attached Storage (NAS)</option>
-                        <option value="Encrypted USB Drive">Encrypted USB Drive</option>
-                    </select>
+                <label for="notes">Notes/Comments:</label>
+                <textarea id="notes" name="notes" rows="4"></textarea>
 
-                    <label>Court Prep Status:</label>
-                    <div>
-                        <input type="radio" id="pending" name="court_prep_status" value="Pending" required>
-                        <label for="pending">Pending</label>
-                        <input type="radio" id="completed" name="court_prep_status" value="Completed">
-                        <label for="completed">Completed</label>
-                    </div>
-
-                    <label for="report_generated">Report Generated:</label>
-                    <div>
-                        <input type="checkbox" id="report_generated" name="report_generated" value="1">
-                        <label for="report_generated">Yes</label>
-                    </div>
-
-                    <label for="notes">Notes/Comments:</label>
-                    <textarea id="notes" name="notes" rows="4"></textarea>
-
-                    <button type="submit" name="prepare_evidence">Submit</button>
-                </form>
-            </div>
+                <button type="submit" name="prepare_evidence">Submit</button>
+            </form>
         </div>
     </div>
+
+    <!-- Transfer Evidence Section -->
+    <div id="transfer_evidence" style="display: none;">
+        <h2>Transfer Evidence</h2>
+        <table>
+            <tr>
+                <th>Evidence ID</th>
+                <th>Evidence Name</th>
+                <th>Case Name</th>
+                <th>Description</th>
+                <th>Collection Date</th>
+                <th>Storage Location</th>
+                <th>Storage Action</th>
+                <th>Lab Status</th>
+            </tr>
+            <?php
+            mysqli_data_seek($result, 0);
+            if ($result && mysqli_num_rows($result) > 0) {
+                while ($row = mysqli_fetch_assoc($result)) { ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($row['evidence_id']); ?></td>
+                        <td><?php echo htmlspecialchars($row['evidence_name']); ?></td>
+                        <td>Case #<?php echo htmlspecialchars($row['case_id']); ?></td>
+                        <td><?php echo htmlspecialchars($row['description']); ?></td>
+                        <td><?php echo htmlspecialchars($row['collection_date']); ?></td>
+                        <td><?php echo htmlspecialchars($row['storage_location']); ?></td>
+                        <td>
+                            <form method="post" action="">
+                                <input type="hidden" name="evidence_id" value="<?php echo htmlspecialchars($row['evidence_id']); ?>">
+                                <input type="hidden" name="storage_location" value="<?php echo htmlspecialchars($row['storage_location']); ?>">
+                                <button type="submit" name="store_evidence" class="store-button">Store</button>
+                            </form>
+                        </td>
+                        <td>
+                            <?php echo ($row['lab_status'] == 'Stored') ? '<span style="color: green;">Stored</span>' : '<span style="color: red;">Not Stored</span>'; ?>
+                        </td>
+                    </tr>
+                <?php }
+            } else { ?>
+                <tr><td colspan="8">No records found.</td></tr>
+            <?php } ?>
+        </table>
+    </div>
+
+</div>
+
 </body>
 </html>
